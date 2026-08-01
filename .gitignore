@@ -155,3 +155,9 @@ user*.bat
 ### Generated headers
 version.h
 version.hpp
+
+### Backlog.md / planning . agentic files
+.backlog
+.planning
+CLAUDE.md
+AGENTS.md
