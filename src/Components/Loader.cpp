@@ -28,6 +28,7 @@
 #include "Modules/FastFiles.hpp"
 #include "Modules/Friends.hpp"
 #include "Modules/Gamepad.hpp"
+#include "Modules/GamepadCalibration.hpp"
 #include "Modules/Huffman.hpp"
 #include "Modules/IPCPipe.hpp"
 #include "Modules/Lean.hpp"
@@ -131,6 +132,7 @@ namespace Components
 		Register(new FileSystem());
 		Register(new Friends());
 		Register(new Gamepad());
+		Register(new GamepadCalibration());
 		Register(new Rumble());
 		Register(new Huffman());
 		Register(new Lean());
