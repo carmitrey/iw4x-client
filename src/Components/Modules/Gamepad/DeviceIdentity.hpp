@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <ostream>
 
 namespace Components::GamepadControls
@@ -98,4 +99,21 @@ namespace Components::GamepadControls
 	// layout from an unrecognized device is exactly the ambiguity the driver
 	// layer refuses to act on.
 	family classify(vendor_id, product_id) noexcept;
+
+	// What a device is, independent of how it is currently connected.
+	//
+	// Connection and transport live on the device's connection record, not
+	// here: the same identity can be reached over USB or Bluetooth without
+	// becoming a different device.
+	struct device_identity
+	{
+		GamepadControls::family family{family::unknown};
+		std::optional<vendor_id>  vendor;
+		std::optional<product_id> product;
+
+		// Device release in binary-coded decimal from the USB descriptor,
+		// when the transport exposes it. Used only to disambiguate hardware
+		// revisions; it is never required for correct decoding.
+		std::optional<uint16_t> release;
+	};
 }
