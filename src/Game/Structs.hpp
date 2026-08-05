@@ -878,6 +878,20 @@ namespace Game
 		K_AUX15 = 0xDD,
 		K_AUX16 = 0xDE,
 		K_LAST_KEY = 0xDF,
+
+		// iw4x extension (IW-2.7): the base engine gives both analog sticks the
+		// same 4 K_APAD_* keys, so they can't be bound independently. These give
+		// the right stick its own keys while K_APAD_* keeps meaning "left stick"
+		// for config back-compat. Placed at 0xE0-0xE3: keyNum_t stops at
+		// K_LAST_KEY (0xDF) and the engine's keys[256] state array holds 256
+		// entries, so 0xE0-0xFF is free key-number space.
+		//
+		K_FIRSTGAMEPADBUTTON_RANGE_4 = 0xE0, // First Gamepad 4 (iw4x extension)
+		K_RSTICK_UP = 0xE0,
+		K_RSTICK_DOWN = 0xE1,
+		K_RSTICK_LEFT = 0xE2,
+		K_RSTICK_RIGHT = 0xE3,
+		K_LASTGAMEPADBUTTON_RANGE_4 = 0xE3, // Last Gamepad 4 (iw4x extension)
 	};
 
 	enum uiMenuCommand_t

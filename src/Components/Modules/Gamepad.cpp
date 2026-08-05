@@ -28,8 +28,10 @@ namespace Components
 	{
 		{Game::GPAD_LX, Game::K_APAD_RIGHT, Game::K_APAD_LEFT},
 		{Game::GPAD_LY, Game::K_APAD_UP, Game::K_APAD_DOWN},
-		{Game::GPAD_RX, Game::K_APAD_RIGHT, Game::K_APAD_LEFT},
-		{Game::GPAD_RY, Game::K_APAD_UP, Game::K_APAD_DOWN},
+		// Right stick gets its own keys (IW-2.7) instead of sharing K_APAD_* with
+		// the left stick, so the two sticks can be bound independently.
+		{Game::GPAD_RX, Game::K_RSTICK_RIGHT, Game::K_RSTICK_LEFT},
+		{Game::GPAD_RY, Game::K_RSTICK_UP, Game::K_RSTICK_DOWN},
 	};
 
 	Game::GamePadStick Gamepad::stickForAxis[Game::GPAD_PHYSAXIS_COUNT]
@@ -104,6 +106,10 @@ namespace Components
 		{"BUTTON_RSTICK", Game::K_BUTTON_RSTICK},
 		{"BUTTON_LTRIG", Game::K_BUTTON_LTRIG},
 		{"BUTTON_RTRIG", Game::K_BUTTON_RTRIG},
+		{"RSTICK_UP", Game::K_RSTICK_UP},
+		{"RSTICK_DOWN", Game::K_RSTICK_DOWN},
+		{"RSTICK_LEFT", Game::K_RSTICK_LEFT},
+		{"RSTICK_RIGHT", Game::K_RSTICK_RIGHT},
 		{"DPAD_UP", Game::K_DPAD_UP},
 		{"DPAD_DOWN", Game::K_DPAD_DOWN},
 		{"DPAD_LEFT", Game::K_DPAD_LEFT},
@@ -178,9 +184,9 @@ namespace Components
 	Gamepad::GamePadGlobals Gamepad::gamePadGlobals[Game::MAX_GPAD_COUNT]{ {} };
 	int Gamepad::gamePadBindingsModifiedFlags = 0;
 
-	unsigned Gamepad::buttonPressedTime[Game::MAX_GPAD_COUNT][Game::K_LAST_KEY]{};
-	unsigned Gamepad::buttonReleaseTime[Game::MAX_GPAD_COUNT][Game::K_LAST_KEY]{};
-	bool Gamepad::buttonPendingRelease[Game::MAX_GPAD_COUNT][Game::K_LAST_KEY]{};
+	unsigned Gamepad::buttonPressedTime[Game::MAX_GPAD_COUNT][Game::K_LASTGAMEPADBUTTON_RANGE_4 + 1]{};
+	unsigned Gamepad::buttonReleaseTime[Game::MAX_GPAD_COUNT][Game::K_LASTGAMEPADBUTTON_RANGE_4 + 1]{};
+	bool Gamepad::buttonPendingRelease[Game::MAX_GPAD_COUNT][Game::K_LASTGAMEPADBUTTON_RANGE_4 + 1]{};
 
 	Dvar::Var Gamepad::gpad_enabled;
 	Dvar::Var Gamepad::gpad_present;
@@ -1052,7 +1058,8 @@ namespace Components
 	{
 		return key >= Game::K_FIRSTGAMEPADBUTTON_RANGE_1 && key <= Game::K_LASTGAMEPADBUTTON_RANGE_1
 			|| key >= Game::K_FIRSTGAMEPADBUTTON_RANGE_2 && key <= Game::K_LASTGAMEPADBUTTON_RANGE_2
-			|| key >= Game::K_FIRSTGAMEPADBUTTON_RANGE_3 && key <= Game::K_LASTGAMEPADBUTTON_RANGE_3;
+			|| key >= Game::K_FIRSTGAMEPADBUTTON_RANGE_3 && key <= Game::K_LASTGAMEPADBUTTON_RANGE_3
+			|| key >= Game::K_FIRSTGAMEPADBUTTON_RANGE_4 && key <= Game::K_LASTGAMEPADBUTTON_RANGE_4;
 	}
 
 	void Gamepad::CL_GamepadResetMenuScrollTime(const int localClientNum, const int key, const bool down, const unsigned time)
@@ -1943,7 +1950,7 @@ namespace Components
 		if (gamePads[localClientNum].inUse)
 		{
 			const auto gamePadCmd = GetGamePadCommand(cmd);
-			for (auto keyNum = 0; keyNum < Game::K_LAST_KEY; keyNum++)
+			for (auto keyNum = 0; keyNum < Game::K_LASTGAMEPADBUTTON_RANGE_4 + 1; keyNum++)
 			{
 				if (!Key_IsValidGamePadChar(keyNum))
 				{
@@ -1963,7 +1970,7 @@ namespace Components
 		}
 		else
 		{
-			for (auto keyNum = 0; keyNum < Game::K_LAST_KEY; keyNum++)
+			for (auto keyNum = 0; keyNum < Game::K_LASTGAMEPADBUTTON_RANGE_4 + 1; keyNum++)
 			{
 				if (Key_IsValidGamePadChar(keyNum))
 				{

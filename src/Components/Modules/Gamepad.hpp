@@ -96,9 +96,10 @@ namespace Components
 		static Dvar::Var gpad_button_release_delay_sprint_only;
 		static Dvar::Var gpad_button_release_grace;
 
-		static unsigned buttonPressedTime[Game::MAX_GPAD_COUNT][Game::K_LAST_KEY];
-		static unsigned buttonReleaseTime[Game::MAX_GPAD_COUNT][Game::K_LAST_KEY];
-		static bool buttonPendingRelease[Game::MAX_GPAD_COUNT][Game::K_LAST_KEY];
+		// Sized past K_LAST_KEY to also cover the K_RSTICK_* range (IW-2.7).
+		static unsigned buttonPressedTime[Game::MAX_GPAD_COUNT][Game::K_LASTGAMEPADBUTTON_RANGE_4 + 1];
+		static unsigned buttonReleaseTime[Game::MAX_GPAD_COUNT][Game::K_LASTGAMEPADBUTTON_RANGE_4 + 1];
+		static bool buttonPendingRelease[Game::MAX_GPAD_COUNT][Game::K_LASTGAMEPADBUTTON_RANGE_4 + 1];
 
 		static unsigned GetButtonReleaseDelay(int localClientNum);
 		static Dvar::Var gpad_lockon_enabled;
