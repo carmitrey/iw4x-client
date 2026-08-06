@@ -19,40 +19,71 @@ namespace Components::GamepadControls
 	{
 		enabled = false;
 
-		if (gpad_force_xinput_only.get<bool>() == false)
+		// gpad_force_xinput_only's contract is preserved: TransportGamepadAPI
+		// still only ever binds an XInput-family device when this is set,
+		// it just filters within the new registry-driven discovery instead
+		// of trying two separate concrete backends in a fixed order.
+		if (!transport)
 		{
-			// Dualsense first
-			if (!enabled)
-			{
-				api.reset(new GamepadControls::DualSenseGamePadAPI());
-
-				if (api->PlugIn(index))
-				{
-					portIndex = index;
-					enabled = true;
-				}
-			}
+			api.reset(new GamepadControls::TransportGamepadAPI());
+			transport = static_cast<GamepadControls::TransportGamepadAPI*>(api.get());
 		}
 
-		// Xinput
-		if (!enabled)
+		// Unlike the old code, which tore the backend down between failed
+		// attempts, the transport is kept alive whether or not this call
+		// binds anything: its registry/discovery are cheap to keep around,
+		// and re-scanning them is exactly how a later PlugIn call finds a
+		// device that has since appeared.
+		if (transport->PlugIn(index))
 		{
-			api.reset(new GamepadControls::XInputGamePadAPI());
-
-			if (api->PlugIn(index))
-			{
-				portIndex = index;
-				enabled = true;
-			}
-		}
-
-		if (!enabled)
-		{
-			// Clear memory
-			api.reset(nullptr);
+			portIndex = index;
+			enabled = true;
 		}
 
 		return enabled;
+	}
+
+	GamepadControls::stick_vector Controller::GetAimStick() const
+	{
+		return transport ? transport->RightStickRaw() : GamepadControls::stick_vector{};
+	}
+
+	void Controller::NotifyDeviceChange() noexcept
+	{
+		if (transport)
+			transport->NotifyDeviceChange();
+	}
+
+	GamepadControls::deadzone_params Controller::GetStickDeadzoneParams()
+	{
+		GamepadControls::deadzone_params params{
+			GamepadControls::magnitude{gpad_stick_deadzone_min.get<float>()},
+			GamepadControls::magnitude{gpad_stick_deadzone_max.get<float>()},
+			GamepadControls::magnitude{0.0f}
+		};
+
+		// gpad_stick_deadzone_min/max are independently user-configurable
+		// across [0, 1] with no cross-check between them, but
+		// GamepadControls::apply() asserts inner < 1 - outer. Validate
+		// before it ever reaches that assert and fall back to an
+		// always-valid identity deadzone (no shaping) rather than
+		// crashing on an otherwise-harmless dvar combination.
+		std::string why;
+		if (!GamepadControls::validate(params, why))
+		{
+			Logger::Warning(Game::CON_CHANNEL_SYSTEM,
+				"gpad_stick_deadzone_min/max ({}, {}) rejected for the aim deadzone: {} -- using no deadzone instead",
+				params.inner.value, params.outer.value, why);
+
+			params = GamepadControls::deadzone_params{};
+		}
+
+		return params;
+	}
+
+	bool Controller::GetForceXInputOnly()
+	{
+		return gpad_force_xinput_only.get<bool>();
 	}
 
 	void Controller::SetLowRumble(double rumble)

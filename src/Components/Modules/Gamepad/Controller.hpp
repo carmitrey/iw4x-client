@@ -1,5 +1,5 @@
-#include "DualSenseGamepad.hpp"
-#include "XInputGamepad.hpp"
+#include "AimDeadzone.hpp"
+#include "TransportGamepadAPI.hpp"
 
 #define PUBLIC_GET_PRIVATE_SET(type, name) \
 		private:\
@@ -36,6 +36,31 @@ namespace Components::GamepadControls
 
 		void UpdateState(bool additive=false);
 		void PushUpdates();
+
+		// Un-deadzoned, un-curved right-stick vector from the transport
+		// backend's last sample (IW-2.8). Consumed by the aim pipeline,
+		// which owns deadzone/curve shaping for aim itself so it happens
+		// exactly once; GetStick(GPAD_RX/RY) below stays deadzone-remapped
+		// by ApplyDeadzone as before for every other existing consumer.
+		GamepadControls::stick_vector GetAimStick() const;
+
+		// Forward an OS device-change notification to the transport
+		// backend's discovery, so its next scan runs immediately instead
+		// of waiting out the interval.
+		void NotifyDeviceChange() noexcept;
+
+		// Radial deadzone parameters (inner/outer) shared with the aim
+		// pipeline, built from the same gpad_stick_deadzone_min/max dvars
+		// ApplyDeadzone already uses, so aim deadzone shaping matches the
+		// movement deadzone's tuning without duplicating dvars.
+		static GamepadControls::deadzone_params GetStickDeadzoneParams();
+
+		// Whether the transport backend should bind only XInput-family
+		// devices (IW-2.8: the same gpad_force_xinput_only contract the
+		// old two-backend PlugIn used to enforce by only ever trying
+		// XInputGamePadAPI, now enforced by TransportGamepadAPI filtering
+		// within the registry's discovered devices instead).
+		static bool GetForceXInputOnly();
 
 		float GetStick(const Game::GamePadStick stick);
 		float GetButton(Game::GamePadButton button);
@@ -90,6 +115,14 @@ namespace Components::GamepadControls
 
 	private:
 		std::unique_ptr<GamepadControls::GamepadAPI> api;
+
+		// Non-owning alias of api, valid whenever api is set (PlugIn always
+		// constructs a TransportGamepadAPI). Kept separate from the api
+		// pointer -- which stays typed as the small, backend-agnostic
+		// GamepadAPI interface -- so GetAimStick()/NotifyDeviceChange()
+		// don't need to widen that interface for a single backend's extra
+		// accessors.
+		GamepadControls::TransportGamepadAPI* transport{nullptr};
 	};
 }
 

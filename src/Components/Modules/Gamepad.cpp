@@ -188,6 +188,9 @@ namespace Components
 	unsigned Gamepad::buttonReleaseTime[Game::MAX_GPAD_COUNT][Game::K_LASTGAMEPADBUTTON_RANGE_4 + 1]{};
 	bool Gamepad::buttonPendingRelease[Game::MAX_GPAD_COUNT][Game::K_LASTGAMEPADBUTTON_RANGE_4 + 1]{};
 
+	GamepadControls::turn_integrator Gamepad::pitchIntegrators[Game::MAX_GPAD_COUNT]{};
+	GamepadControls::turn_integrator Gamepad::yawIntegrators[Game::MAX_GPAD_COUNT]{};
+
 	Dvar::Var Gamepad::gpad_enabled;
 	Dvar::Var Gamepad::gpad_present;
 	Dvar::Var Gamepad::gpad_in_use;
@@ -361,32 +364,6 @@ namespace Components
 				++currentGamePadNum;
 			}
 		}
-	}
-
-	float Gamepad::LinearTrack(const float target, const float current, const float rate, const float deltaTime)
-	{
-		const auto err = target - current;
-		float step;
-		if (err <= 0.0f)
-		{
-			step = -rate * deltaTime;
-		}
-		else
-		{
-			step = rate * deltaTime;
-		}
-
-		if (std::fabs(err) <= 0.001f)
-		{
-			return target;
-		}
-
-		if (std::fabs(step) <= std::fabs(err))
-		{
-			return current + step;
-		}
-
-		return target;
 	}
 
 	bool Gamepad::AimAssist_DoBoundsIntersectCenterBox(const float* clipMins, const float* clipMaxs, const float clipHalfWidth, const float clipHalfHeight)
@@ -699,30 +676,41 @@ namespace Components
 		const auto pitchSign = adjustedPitchAxis >= 0.0f ? 1.0f : -1.0f;
 		const auto yawSign = adjustedYawAxis >= 0.0f ? 1.0f : -1.0f;
 
-		const auto pitchDelta = std::fabs(adjustedPitchAxis) * pitchTurnRate;
-		const auto yawDelta = std::fabs(adjustedYawAxis) * yawTurnRate;
+		// Target angular rate this frame -- unchanged from before this
+		// task (deadzone-shaped/graph-scaled deflection times the turn
+		// rate ceiling computed above).
+		const GamepadControls::deg_per_s pitchTargetRate{std::fabs(adjustedPitchAxis) * pitchTurnRate};
+		const GamepadControls::deg_per_s yawTargetRate{std::fabs(adjustedYawAxis) * yawTurnRate};
 
-		if (!aim_accel_turnrate_enabled.get<bool>())
+		// Accel/decel limits, reusing the existing dvars unchanged in
+		// meaning: aim_accel_turnrate_enabled=false means instant (a zero
+		// limit is turn_integrator's own documented "no ramp" contract,
+		// matching the old code's direct assignment below the target in
+		// that branch); enabled=true uses aim_accel_turnrate_lerp as both
+		// the accel and decel limit, same value the old LinearTrack call
+		// used as its single rate parameter. Only the integration method
+		// changes here (Euler -> trapezoidal, IW-2.6) -- no dvar's meaning
+		// or default changes (AC#4).
+		GamepadControls::turn_integrator::limits limits{};
+		if (aim_accel_turnrate_enabled.get<bool>())
 		{
-			aaGlob.pitchDelta = pitchDelta;
-			aaGlob.yawDelta = yawDelta;
-		}
-		else
-		{
-			const auto accel = aim_accel_turnrate_lerp.get<float>() * sensitivity;
-			if (pitchDelta <= aaGlob.pitchDelta)
-				aaGlob.pitchDelta = pitchDelta;
-			else
-				aaGlob.pitchDelta = LinearTrack(pitchDelta, aaGlob.pitchDelta, accel, input->deltaTime);
-
-			if (yawDelta <= aaGlob.yawDelta)
-				aaGlob.yawDelta = yawDelta;
-			else
-				aaGlob.yawDelta = LinearTrack(yawDelta, aaGlob.yawDelta, accel, input->deltaTime);
+			const GamepadControls::deg_per_s2 accel{aim_accel_turnrate_lerp.get<float>() * sensitivity};
+			limits.accel = accel;
+			limits.decel = accel;
 		}
 
-		output->pitch += aaGlob.pitchDelta * input->deltaTime * pitchSign;
-		output->yaw += aaGlob.yawDelta * input->deltaTime * yawSign;
+		const GamepadControls::seconds dt{input->deltaTime};
+		const auto pitchAngle = pitchIntegrators[input->localClientNum].advance(pitchTargetRate, limits, dt);
+		const auto yawAngle = yawIntegrators[input->localClientNum].advance(yawTargetRate, limits, dt);
+
+		// aaGlob.pitchDelta/yawDelta (the old per-frame rate accumulator)
+		// is no longer written here; pitchIntegrators/yawIntegrators now
+		// own that persistent state. advance() already integrates the
+		// rate over dt (trapezoidally), so unlike the old
+		// "rate * deltaTime" below, no further multiplication by
+		// deltaTime happens here.
+		output->pitch += pitchAngle.value * pitchSign;
+		output->yaw += yawAngle.value * yawSign;
 	}
 
 	void Gamepad::AimAssist_UpdateGamePadInput(const Game::AimInput* input, Game::AimOutput* output)
@@ -907,11 +895,24 @@ namespace Components
 		auto& gamePad = gamePads[localClientNum];
 		auto& clientActive = Game::clients[localClientNum];
 
-		auto pitch = CL_GamepadAxisValue(localClientNum, Game::GPAD_VIRTAXIS_PITCH);
+		// Pitch/yaw are sourced from the right stick's un-deadzoned value
+		// (IW-2.8), deadzone-shaped here by the aim pipeline instead of
+		// via CL_GamepadAxisValue's GPAD_VIRTAXIS_PITCH/YAW (which reads
+		// Controller::sticks[2]/[3], deadzoned a second time by
+		// Controller::ApplyDeadzone for every OTHER consumer -- K_RSTICK_*
+		// generation, click-declick, etc). Matches thumbstick_default.cfg's
+		// default axis binding (right stick -> yaw/pitch); a player who has
+		// rebound yaw/pitch onto a different physical axis via bindaxis
+		// still gets aim shaping sourced from the physical right stick,
+		// a known, narrow simplification versus the fully generic
+		// per-virtual-axis binding CL_GamepadAxisValue supports.
+		const auto aimStick = GamepadControls::apply(GamepadControls::Controller::GetStickDeadzoneParams(), gamePad.GetAimStick());
+
+		auto pitch = aimStick.y;
 		if (!input_invertPitch.get<bool>())
 			pitch *= -1;
 
-		auto yaw = -CL_GamepadAxisValue(localClientNum, Game::GPAD_VIRTAXIS_YAW);
+		auto yaw = -aimStick.x;
 		auto forward = CL_GamepadAxisValue(localClientNum, Game::GPAD_VIRTAXIS_FORWARD);
 		auto side = CL_GamepadAxisValue(localClientNum, Game::GPAD_VIRTAXIS_SIDE);
 
@@ -1456,7 +1457,18 @@ namespace Components
 	{
 		for (auto localClientNum = 0; localClientNum < Game::MAX_GPAD_COUNT; ++localClientNum)
 		{
-			const auto& gamePad = gamePads[localClientNum];
+			// Retry becoming enabled every call, even without a hotplug
+			// notification (IW-2.8): GPad_Check's underlying scan is cheap
+			// and internally rate-limited by discovery::interval, so this
+			// is what picks up an XInput controller plugged in after
+			// startup -- XInput arrivals raise no HID device-change
+			// notification, so GPad_RefreshAll's hotplug path alone would
+			// otherwise never see them. GPad_Check takes
+			// gamePadStateMutexes[localClientNum] itself, so this must run
+			// before this function's own lock below, not inside it.
+			//
+			if (!GPad_Check(localClientNum, 0))
+				continue;
 
 			std::unique_lock lock(gamePadStateMutexes[localClientNum], std::try_to_lock);
 
@@ -1467,11 +1479,6 @@ namespace Components
 			//
 			if (!lock.owns_lock())
 				continue;
-
-			if (!gamePad.get_enabled())
-			{
-				continue;
-			}
 
 			if (!Gamepad::gpad_rumble.get<bool>())
 			{
@@ -1526,7 +1533,20 @@ namespace Components
 		for (auto i (0); i < Game::MAX_GPAD_COUNT; ++i)
 		{
 			auto& g (gamePads [i]);
-			std::lock_guard _ (gamePadStateMutexes [i]);
+			std::unique_lock lock (gamePadStateMutexes [i], std::try_to_lock);
+
+			// Matches GPad_Check/GPad_UpdateAll's existing precedent
+			// (IW-2.8 lesson): skip this gamepad rather than block on a
+			// contested lock. This was the one blocking acquisition of
+			// gamePadStateMutexes left in the file; with IW-2.8's
+			// TransportGamepadAPI now contending for it every frame
+			// (GPad_Check's periodic retry-PlugIn, in addition to
+			// Controller::UpdateState/PushUpdates), a blocking wait here
+			// is a self-deadlock risk if this same thread ever re-enters
+			// this function (e.g. via a reentrant message pump) while
+			// still holding the lock from an outer call.
+			if (!lock.owns_lock ())
+				continue;
 
 			if (!g.get_enabled ())
 				continue;
@@ -2342,7 +2362,15 @@ namespace Components
 		Window::OnDeviceChange([](WPARAM wParam, LPARAM)
 		{
 			if (wParam == GIDC_ARRIVAL || wParam == GIDC_REMOVAL)
+			{
+				// Forward to the transport backend's discovery (IW-2.8) so
+				// its next scan runs immediately instead of waiting out
+				// discovery::interval, then refresh as before.
+				for (auto& gamePad : gamePads)
+					gamePad.NotifyDeviceChange();
+
 				GPad_RefreshAll();
+			}
 		});
 
 		// Perform an initial scan to detect any gamepads already connected

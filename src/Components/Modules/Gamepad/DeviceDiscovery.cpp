@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <variant>
 
 namespace Components::GamepadControls
 {
@@ -65,16 +66,47 @@ namespace Components::GamepadControls
 		const bool changed(pending_.exchange(false));
 		const auto now(std::chrono::steady_clock::now());
 
-		// A device-change notification forces a scan now; otherwise the
-		// interval rate-limits it. The interval also catches XInput
-		// arrivals, which raise no HID notification.
+		// A device-change notification forces a full scan now (matching
+		// scan_now()); otherwise this is the periodic path, which
+		// re-checks XInput every `interval` but HID far less often -- see
+		// hid_interval's comment.
 		if (!changed && scanned_ && now - last_scan_ < interval)
 			return;
 
-		last_scan_ = now;
-		scanned_ = true;
+		if (changed || !scanned_)
+		{
+			last_scan_ = now;
+			last_hid_scan_ = now;
+			scanned_ = true;
+			scan_now();
+			return;
+		}
 
-		scan_now();
+		last_scan_ = now;
+
+		std::vector<transport_binding> seen;
+		seen.reserve(user_index::count + 4);
+
+		scan_xinput(seen);
+
+		if (hid_enabled_ && now - last_hid_scan_ >= hid_interval)
+		{
+			last_hid_scan_ = now;
+			scan_hid(seen);
+		}
+		else if (hid_enabled_)
+		{
+			// Not re-enumerating HID this cycle: keep every already-bound
+			// HID device's binding in `seen` so retire_unseen() does not
+			// drop it just because this particular pass did not look.
+			registry_.for_each([&seen](const device_connection& d)
+			{
+				if (std::holds_alternative<hid_binding>(d.binding))
+					seen.push_back(d.binding);
+			});
+		}
+
+		retire_unseen(seen);
 	}
 
 	void discovery::scan_now()
@@ -86,7 +118,9 @@ namespace Components::GamepadControls
 		seen.reserve(user_index::count + 4);
 
 		scan_xinput(seen);
-		scan_hid(seen);
+
+		if (hid_enabled_)
+			scan_hid(seen);
 
 		retire_unseen(seen);
 	}

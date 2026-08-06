@@ -16,12 +16,13 @@ namespace Components
 	// command.
 	//
 	// Wholly self-contained: it owns its own transport/registry/discovery/
-	// driver_set instances rather than reusing the legacy
-	// GamepadControls::Controller path, so it does not modify or depend on
-	// Controller.cpp/Gamepad.cpp/XInputGamepad.cpp/DualSenseGamepad.cpp -
-	// wiring the ported driver stack into that live frame path is a later
-	// task. This component exists to make the calibration pipeline
-	// (Gamepad/Calibration*.hpp) exercisable end to end today.
+	// driver_set instances rather than reusing Controller's (now, since
+	// IW-2.8, also transport/registry/discovery/driver_set-backed) live
+	// path, so a calibration session never contends with the live frame
+	// path's own device binding. This component exists to make the
+	// calibration pipeline (Gamepad/Calibration*.hpp) exercisable end to
+	// end on its own, independent of whatever else is using the
+	// controller.
 	class GamepadCalibration : public Component
 	{
 	public:

@@ -53,7 +53,27 @@ namespace Components::GamepadControls
 		// so a caller need only forward the raw hotplug signal.
 		void notify_device_change() noexcept { pending_.store(true); }
 
+		// Whether scan()/scan_now() enumerate HID devices at all. Defaults
+		// to true. A caller that only ever wants XInput-family devices
+		// (matching gpad_force_xinput_only) can disable this to skip HID
+		// enumeration outright rather than just throttling it (IW-2.8).
+		void set_hid_enumeration_enabled(bool enabled) noexcept { hid_enabled_ = enabled; }
+
 		static constexpr std::chrono::milliseconds interval{1000};
+
+		// HID enumeration (scan_hid(), via enumerate() in HidDevice.cpp)
+		// walks every HID interface the OS reports -- keyboard, mouse, any
+		// USB HID peripheral, not just game controllers -- opening a handle
+		// and querying each one through SetupAPI. Measured under some Wine/
+		// Proton configurations to be expensive enough that running it every
+		// `interval` on the main thread stalls the frame loop badly enough
+		// to look like a hang (IW-2.8 finding, live-hardware testing).
+		// scan()'s periodic path therefore re-enumerates HID far less often
+		// than it re-checks XInput (which is a handful of cheap
+		// XInputGetCapabilities calls); scan_now() -- the startup and
+		// device-change-notification path -- still does both immediately,
+		// since that path is rare by construction, not a per-frame cost.
+		static constexpr std::chrono::milliseconds hid_interval{30000};
 
 	private:
 		// Record the devices each transport currently reports, appending
@@ -69,8 +89,10 @@ namespace Components::GamepadControls
 		const xinput_module&  xinput_;
 
 		std::atomic<bool> pending_{false};
+		bool              hid_enabled_{true};
 
 		bool                                  scanned_{false};
 		std::chrono::steady_clock::time_point last_scan_{};
+		std::chrono::steady_clock::time_point last_hid_scan_{};
 	};
 }

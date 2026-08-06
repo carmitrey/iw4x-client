@@ -6,6 +6,7 @@
 #include <mutex>
 #include <thread>
 
+#include "Gamepad/AimIntegrator.hpp"
 #include "Gamepad/Controller.hpp"
 
 namespace Components
@@ -101,6 +102,14 @@ namespace Components
 		static unsigned buttonReleaseTime[Game::MAX_GPAD_COUNT][Game::K_LASTGAMEPADBUTTON_RANGE_4 + 1];
 		static bool buttonPendingRelease[Game::MAX_GPAD_COUNT][Game::K_LASTGAMEPADBUTTON_RANGE_4 + 1];
 
+		// Persistent per-client turn-rate state for AimAssist_ApplyTurnRates
+		// (IW-2.8): trapezoidal integrators replacing the old per-frame
+		// LinearTrack/Euler accumulation in aaGlob.pitchDelta/yawDelta,
+		// which made total turned angle depend on how finely a frame's dt
+		// happened to be subdivided.
+		static GamepadControls::turn_integrator pitchIntegrators[Game::MAX_GPAD_COUNT];
+		static GamepadControls::turn_integrator yawIntegrators[Game::MAX_GPAD_COUNT];
+
 		static unsigned GetButtonReleaseDelay(int localClientNum);
 		static Dvar::Var gpad_lockon_enabled;
 		static Dvar::Var gpad_slowdown_enabled;
@@ -129,8 +138,6 @@ namespace Components
 		static Dvar::Var aim_lockon_pitch_strength;
 		static Dvar::Var aim_lockon_strength;
 
-		static DS5W::DeviceContext dualSenseContext;
-
 		static void MSG_WriteDeltaUsercmdKeyStub();
 
 		static void ApplyMovement(Game::msg_t* msg, int key, Game::usercmd_s* from, Game::usercmd_s* to);
@@ -138,7 +145,6 @@ namespace Components
 		static void MSG_ReadDeltaUsercmdKeyStub();
 		static void MSG_ReadDeltaUsercmdKeyStub2();
 
-		static float LinearTrack(float target, float current, float rate, float deltaTime);
 		static bool AimAssist_DoBoundsIntersectCenterBox(const float* clipMins, const float* clipMaxs, float clipHalfWidth, float clipHalfHeight);
 		static bool AimAssist_IsPlayerUsingOffhand(Game::AimAssistPlayerState* ps);
 		static const Game::AimScreenTarget* AimAssist_GetBestTarget(const Game::AimAssistGlobals* aaGlob, float range, float regionWidth, float regionHeight);
